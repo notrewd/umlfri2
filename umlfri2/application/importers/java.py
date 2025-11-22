@@ -318,6 +318,19 @@ class JavaSourceParser:
                     is_constructor=True,
                 )
             )
+
+        if isinstance(type_decl, javalang.tree.ClassDeclaration) and not result:
+            access_modifiers = {m for m in (type_decl.modifiers or []) if m in ["public", "protected", "private"]}
+            result.append(
+                JavaMethod(
+                    name=type_decl.name,
+                    return_type=None,
+                    parameters=[],
+                    modifiers=access_modifiers,
+                    is_constructor=True,
+                )
+            )
+
         for method in getattr(type_decl, "methods", []):
             params = [JavaMethodParameter(name=param.name, type_descriptor=self._convert_reference(param.type)) for param in method.parameters]
             result.append(

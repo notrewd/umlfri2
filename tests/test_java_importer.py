@@ -123,6 +123,50 @@ class JavaImporterParserTests(unittest.TestCase):
         resolved = resolver.resolve(descriptor, source_model)
         self.assertEqual(resolved, "com.sample.Target")
 
+    def test_parser_adds_default_constructor(self):
+        source = textwrap.dedent(
+            """
+            public class NoConstructor {
+                private int value;
+            }
+            """
+        ).strip()
+
+        with TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "NoConstructor.java")
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write(source)
+
+            result = JavaSourceParser().parse_files([path])
+
+        model = result.types["NoConstructor"]
+        constructors = [m for m in model.methods if m.is_constructor]
+        self.assertEqual(len(constructors), 1)
+        self.assertEqual(constructors[0].name, "NoConstructor")
+        self.assertEqual(constructors[0].parameters, [])
+        self.assertIn("public", constructors[0].modifiers)
+
+    def test_parser_adds_default_constructor_package_private(self):
+        source = textwrap.dedent(
+            """
+            class PackagePrivate {
+            }
+            """
+        ).strip()
+
+        with TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "PackagePrivate.java")
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write(source)
+
+            result = JavaSourceParser().parse_files([path])
+
+        model = result.types["PackagePrivate"]
+        constructors = [m for m in model.methods if m.is_constructor]
+        self.assertEqual(len(constructors), 1)
+        self.assertEqual(constructors[0].name, "PackagePrivate")
+        self.assertFalse(any(m in constructors[0].modifiers for m in ["public", "protected", "private"]))
+
 
 if __name__ == "__main__":
     unittest.main()
