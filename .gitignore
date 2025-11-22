@@ -21,3 +21,4 @@ tools/win32exe/stub/*.VC.db
 tools/win32exe/stub/*.VC.VC.opendb
 tools/win32exe/stub/*.vs
 addons/python_starter/library/*
+.DS_Store
