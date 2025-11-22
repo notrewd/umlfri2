@@ -1,10 +1,12 @@
+import logging
 import os.path
 
 from PyQt5.QtCore import Qt, QSettings, QUrl
 from PyQt5.QtGui import QIcon, QDesktopServices
-from PyQt5.QtWidgets import QMainWindow, QDockWidget, QMessageBox, QFileDialog, QApplication
+from PyQt5.QtWidgets import QMainWindow, QDockWidget, QMessageBox, QFileDialog, QApplication, QInputDialog
 
 from umlfri2.application import Application
+from umlfri2.application.importers import JavaImportController, JavaImportError
 from umlfri2.application.addon.local import AddOnState
 from umlfri2.application.events.addon import AddOnStateChangedEvent
 from umlfri2.application.events.application import LanguageChangedEvent, ChangeStatusChangedEvent, \
@@ -24,6 +26,8 @@ from ..projecttree import ProjectTree
 from ..properties import PropertiesWidget
 from ..toolbox import MainToolBox
 from .tabs import Tabs
+
+LOGGER = logging.getLogger(__name__)
 
 
 class UmlFriMainWindow(QMainWindow):
@@ -91,6 +95,8 @@ class UmlFriMainWindow(QMainWindow):
 
         if not Application().about.updates.checking_update:
             self.__update_dialog()
+
+        self.__java_importer = JavaImportController()
     
     def __language_changed(self, event):
         self.__reload_texts()
@@ -243,6 +249,63 @@ class UmlFriMainWindow(QMainWindow):
             return True # the project was saved
         else:
             return False # the project was not saved
+
+    def import_java_sources(self):
+        if Application().unsaved:
+            if not self.__check_save(_("Import Java Sources")):
+                return
+
+        directory = QFileDialog.getExistingDirectory(self, caption=_("Select Java Source Folder"))
+        if not directory:
+            return
+
+        suggested_name = os.path.basename(directory) or _("Imported Java Project")
+        name, ok = QInputDialog.getText(
+            self,
+            _("Project Name"),
+            _("Choose a name for the imported project:"),
+            text=suggested_name,
+        )
+        if not ok:
+            return
+        project_name = name.strip() or suggested_name
+
+        cursor_applied = False
+        try:
+            QApplication.setOverrideCursor(Qt.WaitCursor)
+            cursor_applied = True
+            report = self.__java_importer.import_directory(directory, project_name=project_name)
+        except JavaImportError as exc:
+            QMessageBox.critical(self, _("Java Import Failed"), str(exc))
+            return
+        except Exception as exc:  # pylint: disable=broad-except
+            LOGGER.exception("Unexpected error while importing Java sources")
+            QMessageBox.critical(self, _("Java Import Failed"), str(exc))
+            return
+        finally:
+            if cursor_applied:
+                QApplication.restoreOverrideCursor()
+
+        if report.summary.primary_diagram is not None:
+            Application().tabs.select_tab(report.summary.primary_diagram)
+        self.__project_tree.reload()
+
+        warning_text = ""
+        if report.warnings:
+            max_preview = 5
+            preview = "\n".join(report.warnings[:max_preview])
+            if len(report.warnings) > max_preview:
+                preview += "\n" + _("... and {0} more warnings").format(len(report.warnings) - max_preview)
+            warning_text = "\n\n" + _("Warnings:") + "\n" + preview
+
+        QMessageBox.information(
+            self,
+            _("Java Import Complete"),
+            _("Imported {0} classes and created {1} relationships.").format(
+                report.summary.elements_created,
+                report.summary.connections_created,
+            ) + warning_text
+        )
     
     def __create_addon_toolbars(self):
         for addon in Application().addons.local:
