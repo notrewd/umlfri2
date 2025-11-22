@@ -15,7 +15,7 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v6.0.0
         with:
-          python-version: '3.11'
+          python-version: "3.11"
 
       - name: Install dependencies
         shell: bash
@@ -27,7 +27,7 @@ jobs:
 
       - name: Build executable
         run: |
-          pyinstaller -n umlfri2 --onefile main.py
+          pyinstaller --onefile --windowed umlfri2.spec
 
       - name: Upload executable to release
         uses: softprops/action-gh-release@v2.4.2

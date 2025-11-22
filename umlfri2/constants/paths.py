@@ -1,9 +1,13 @@
 import os.path
+import sys
 import appdirs
 
 APP_DIRS = appdirs.AppDirs('umlfri2')
 
-ROOT_DIR = os.path.normpath(os.path.join(os.path.dirname(__file__), '..', '..'))
+if getattr(sys, 'frozen', False):
+    ROOT_DIR = sys._MEIPASS
+else:
+    ROOT_DIR = os.path.normpath(os.path.join(os.path.dirname(__file__), '..', '..'))
 
 XML_SCHEMAS = os.path.join(ROOT_DIR, 'data', 'schema')
 GRAPHICS = os.path.join(ROOT_DIR, 'data', 'graphics')
