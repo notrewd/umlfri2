@@ -1,6 +1,6 @@
 ----------------------------------------------------------------
 
-If there’s an error, use:
+If there’s an error on macOS, use:
 
 find . -name ".DS_Store" -delete
 
