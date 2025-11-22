@@ -308,17 +308,6 @@ class JavaSourceParser:
 
     def _convert_methods(self, type_decl: javalang.tree.TypeDeclaration) -> List[JavaMethod]:
         result: List[JavaMethod] = []
-        for method in getattr(type_decl, "methods", []):
-            params = [JavaMethodParameter(name=param.name, type_descriptor=self._convert_reference(param.type)) for param in method.parameters]
-            result.append(
-                JavaMethod(
-                    name=method.name,
-                    return_type=self._convert_reference(method.return_type),
-                    parameters=params,
-                    modifiers=set(method.modifiers or []),
-                    is_constructor=False,
-                )
-            )
         for constructor in getattr(type_decl, "constructors", []):
             params = [JavaMethodParameter(name=param.name, type_descriptor=self._convert_reference(param.type)) for param in constructor.parameters]
             result.append(
@@ -328,6 +317,17 @@ class JavaSourceParser:
                     parameters=params,
                     modifiers=set(constructor.modifiers or []),
                     is_constructor=True,
+                )
+            )
+        for method in getattr(type_decl, "methods", []):
+            params = [JavaMethodParameter(name=param.name, type_descriptor=self._convert_reference(param.type)) for param in method.parameters]
+            result.append(
+                JavaMethod(
+                    name=method.name,
+                    return_type=self._convert_reference(method.return_type),
+                    parameters=params,
+                    modifiers=set(method.modifiers or []),
+                    is_constructor=False,
                 )
             )
         if isinstance(type_decl, javalang.tree.InterfaceDeclaration):
