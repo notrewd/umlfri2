@@ -1,11 +1,3 @@
----
-
-If there’s an error on macOS, open the source directory in terminal, and use:
-
-find . -name ".DS_Store" -delete
-
----
-
 # Automatic Java Import
 
 UML .FRI now understands how to build a full class diagram directly from Java
@@ -22,3 +14,9 @@ source files:
 Warnings reported by the importer (for example syntax errors in individual
 files) are displayed after the import finishes so you can fix the sources and
 run the import again if necessary.
+
+# Error handling on macOS
+
+There might be a case where the application errors out due to DS_Store files.
+In this case type the following in the terminal:
+`find . -name ".DS_Store" -delete`
