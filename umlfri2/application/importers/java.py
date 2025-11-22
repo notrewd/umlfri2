@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import math
 import os
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -395,7 +394,7 @@ class JavaModelBuilder:
         self._association_type = self._metamodel.get_connection_type(ASSOCIATION_CONNECTION)
         self._packages: Dict[Tuple[str, ...], ElementObject] = {}
         self._class_elements: Dict[str, ElementObject] = {}
-        self._class_visuals: List[object] = []
+        self._class_visuals: Dict[str, object] = {}
         self._connections: Set[Tuple[str, str, str]] = set()
         self._diagram: Optional[Diagram] = None
 
@@ -422,8 +421,8 @@ class JavaModelBuilder:
                 self._register_class_visual(model.full_name, element)
                 total_elements += 1
 
-        self._layout_classes()
         total_connections = self._create_connections(types, resolver, diagram)
+        self._layout_classes(types, resolver)
         self._project.invalidate_all_caches()
         return BuildSummary(elements_created=total_elements, connections_created=total_connections, primary_diagram=diagram)
 
@@ -483,7 +482,7 @@ class JavaModelBuilder:
             raise JavaImportError("Diagram is not initialized")
 
         visual = self._diagram.show(element)
-        self._class_visuals.append(visual)
+        self._class_visuals[class_name] = visual
 
     def _populate_attributes(self, mutable, fields: List[JavaField]):
         attributes = mutable.get_value("attributes")
@@ -509,48 +508,188 @@ class JavaModelBuilder:
                 prow.set_value("name", param.name)
                 prow.set_value("type", param.type_descriptor.display() if param.type_descriptor else "")
 
-    def _layout_classes(self):
+    def _layout_classes(self, types: Dict[str, JavaTypeModel], resolver: JavaTypeResolver):
         if not self._class_visuals:
             return
 
-        count = len(self._class_visuals)
-        columns = max(1, int(math.sqrt(count)))
-        rows = math.ceil(count / columns)
+        # 1. Build Graph and Calculate Ranks (Inheritance only for Y-axis)
+        hierarchy = defaultdict(list)
+        all_nodes = set(types.keys())
+        children = set()
 
-        column_widths = [self.BASE_ELEMENT_WIDTH for _ in range(columns)]
-        row_heights = [self.BASE_ELEMENT_HEIGHT for _ in range(rows)]
-        layout_entries = []
+        # Edges for layout (u -> v means u influences v's position)
+        # We track neighbors for barycenter calculation
+        neighbors = defaultdict(set)
+        
+        # Collect inheritance edges
+        for name, model in types.items():
+            parents = []
+            for base in model.extends:
+                resolved = resolver.resolve(base, model)
+                if resolved and resolved in types:
+                    parents.append(resolved)
+            for iface in model.implements:
+                resolved = resolver.resolve(iface, model)
+                if resolved and resolved in types:
+                    parents.append(resolved)
+            
+            for parent in parents:
+                hierarchy[parent].append(name)
+                children.add(name)
+                neighbors[name].add(parent)
+                neighbors[parent].add(name)
 
-        for idx, visual in enumerate(self._class_visuals):
-            column = idx % columns
-            row = idx // columns
-            minimal = visual.get_minimal_size(self._ruler)
-            width = max(self.BASE_ELEMENT_WIDTH, minimal.width)
-            height = max(self.BASE_ELEMENT_HEIGHT, minimal.height)
-            column_widths[column] = max(column_widths[column], width)
-            row_heights[row] = max(row_heights[row], height)
-            layout_entries.append((visual, width, height, column, row))
+        # Collect association edges for crossing minimization (but not for rank)
+        for name, model in types.items():
+            targets = self._resolve_field_targets_for_model(model, resolver)
+            for target in targets:
+                if target in types and target != name:
+                    neighbors[name].add(target)
+                    neighbors[target].add(name)
 
-        column_offsets = []
-        offset = 0
-        for width in column_widths:
-            column_offsets.append(offset)
-            offset += width + self.ELEMENT_SPACING_X
+        # Assign Ranks
+        roots = list(all_nodes - children)
+        ranks = {}
+        
+        def assign_rank(node, rank):
+            if node in ranks and ranks[node] >= rank:
+                return
+            ranks[node] = rank
+            for child in hierarchy[node]:
+                assign_rank(child, rank + 1)
 
-        row_offsets = []
-        offset = 0
-        for height in row_heights:
-            row_offsets.append(offset)
-            offset += height + self.ELEMENT_SPACING_Y
+        for root in roots:
+            assign_rank(root, 0)
+            
+        # Handle disconnected nodes or cycles
+        for node in all_nodes:
+            if node not in ranks:
+                assign_rank(node, 0)
 
-        origin_x = 40
-        origin_y = 40
+        # 2. Insert Dummy Nodes for long edges
+        # We need to consider all edges that will be drawn
+        visual_edges = set()
+        
+        # Inheritance edges
+        for parent, kids in hierarchy.items():
+            for kid in kids:
+                visual_edges.add(tuple(sorted((parent, kid))))
+        
+        # Association edges
+        for name, model in types.items():
+            targets = self._resolve_field_targets_for_model(model, resolver)
+            for target in targets:
+                if target in types and target != name:
+                    visual_edges.add(tuple(sorted((name, target))))
 
-        for visual, width, height, column, row in layout_entries:
-            x = origin_x + column_offsets[column]
-            y = origin_y + row_offsets[row]
-            visual.move(self._ruler, Point(x, y))
-            visual.resize(self._ruler, Size(width, height))
+        layer_nodes = defaultdict(list)
+        for node, rank in ranks.items():
+            layer_nodes[rank].append(node)
+
+        # Add dummy nodes
+        dummy_nodes = {} # id -> rank
+        dummy_edges = defaultdict(list) # node -> [neighbors] (including dummies)
+        
+        # Re-build adjacency for ordering including dummies
+        ordering_neighbors = defaultdict(set)
+        
+        for u, v in visual_edges:
+            rank_u, rank_v = ranks[u], ranks[v]
+            if rank_u > rank_v:
+                u, v = v, u
+                rank_u, rank_v = rank_v, rank_u
+            
+            if rank_v - rank_u > 1:
+                # Insert dummies
+                prev = u
+                for r in range(rank_u + 1, rank_v):
+                    dummy_id = f"__dummy_{u}_{v}_{r}"
+                    dummy_nodes[dummy_id] = r
+                    layer_nodes[r].append(dummy_id)
+                    
+                    ordering_neighbors[prev].add(dummy_id)
+                    ordering_neighbors[dummy_id].add(prev)
+                    prev = dummy_id
+                
+                ordering_neighbors[prev].add(v)
+                ordering_neighbors[v].add(prev)
+            else:
+                ordering_neighbors[u].add(v)
+                ordering_neighbors[v].add(u)
+
+        # 3. Order Nodes in Layers (Crossing Minimization)
+        max_rank = max(ranks.values()) if ranks else 0
+        
+        # Initial sort by name to be deterministic
+        for r in layer_nodes:
+            layer_nodes[r].sort()
+
+        def get_barycenter(node, neighbor_layer):
+            relevant_neighbors = [n for n in ordering_neighbors[node] 
+                                if (n in ranks and ranks[n] == neighbor_layer) or 
+                                   (n in dummy_nodes and dummy_nodes[n] == neighbor_layer)]
+            if not relevant_neighbors:
+                return 0
+            
+            positions = []
+            for n in relevant_neighbors:
+                if n in layer_nodes[neighbor_layer]:
+                    positions.append(layer_nodes[neighbor_layer].index(n))
+            
+            return sum(positions) / len(positions) if positions else 0
+
+        # Iterative refinement
+        iterations = 10
+        for _ in range(iterations):
+            # Down sweep
+            for r in range(1, max_rank + 1):
+                layer_nodes[r].sort(key=lambda n: get_barycenter(n, r - 1))
+            
+            # Up sweep
+            for r in range(max_rank - 1, -1, -1):
+                layer_nodes[r].sort(key=lambda n: get_barycenter(n, r + 1))
+
+        # 4. Assign Coordinates
+        current_y = 40
+        
+        for rank in range(max_rank + 1):
+            nodes = layer_nodes[rank]
+            row_height = 0
+            
+            # Calculate row height first
+            for node in nodes:
+                if node in self._class_visuals:
+                    visual = self._class_visuals[node]
+                    minimal = visual.get_minimal_size(self._ruler)
+                    row_height = max(row_height, max(self.BASE_ELEMENT_HEIGHT, minimal.height))
+            
+            if row_height == 0:
+                row_height = self.BASE_ELEMENT_HEIGHT # Fallback for rows with only dummies
+
+            current_x = 40
+            for node in nodes:
+                if node in self._class_visuals:
+                    visual = self._class_visuals[node]
+                    minimal = visual.get_minimal_size(self._ruler)
+                    width = max(self.BASE_ELEMENT_WIDTH, minimal.width)
+                    height = max(self.BASE_ELEMENT_HEIGHT, minimal.height)
+                    
+                    visual.move(self._ruler, Point(current_x, current_y))
+                    visual.resize(self._ruler, Size(width, height))
+                    
+                    current_x += width + self.ELEMENT_SPACING_X
+                else:
+                    # Dummy node spacing
+                    current_x += self.ELEMENT_SPACING_X # Just reserve some space for the line
+            
+            current_y += row_height + self.ELEMENT_SPACING_Y
+
+    def _resolve_field_targets_for_model(self, model: JavaTypeModel, resolver: JavaTypeResolver) -> Set[str]:
+        targets: Set[str] = set()
+        for field in model.fields:
+            if field.type_descriptor:
+                targets.update(self._resolve_field_targets(field.type_descriptor, resolver, model))
+        return targets
 
     def _create_connections(self, types: Dict[str, JavaTypeModel], resolver: JavaTypeResolver, diagram) -> int:
         created = 0
