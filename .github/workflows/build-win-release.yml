@@ -27,7 +27,7 @@ jobs:
 
       - name: Build executable
         run: |
-          pyinstaller --onefile --windowed umlfri2.spec
+          pyinstaller umlfri2.spec
 
       - name: Upload executable to release
         uses: softprops/action-gh-release@v2.4.2
