@@ -6,7 +6,13 @@ from PyQt5.QtGui import QIcon, QDesktopServices
 from PyQt5.QtWidgets import QMainWindow, QDockWidget, QMessageBox, QFileDialog, QApplication, QInputDialog
 
 from umlfri2.application import Application
-from umlfri2.application.importers import JavaImportController, JavaImportError, JavaImportView
+from umlfri2.application.importers import (
+    JavaImportController, JavaImportError, JavaImportView,
+    CSharpImportController, CSharpImportError,
+    CppImportController, CppImportError,
+    PythonImportController, PythonImportError,
+    ImportView,
+)
 from umlfri2.application.addon.local import AddOnState
 from umlfri2.application.events.addon import AddOnStateChangedEvent
 from umlfri2.application.events.application import LanguageChangedEvent, ChangeStatusChangedEvent, \
@@ -97,6 +103,9 @@ class UmlFriMainWindow(QMainWindow):
             self.__update_dialog()
 
         self.__java_importer = JavaImportController()
+        self.__csharp_importer = CSharpImportController()
+        self.__cpp_importer = CppImportController()
+        self.__python_importer = PythonImportController()
     
     def __language_changed(self, event):
         self.__reload_texts()
@@ -316,6 +325,106 @@ class UmlFriMainWindow(QMainWindow):
         QMessageBox.information(
             self,
             _("Java Import Complete"),
+            _("Imported {0} classes and created {1} relationships.").format(
+                report.summary.elements_created,
+                report.summary.connections_created,
+            ) + warning_text
+        )
+
+    def import_csharp_sources(self):
+        self.__import_sources(
+            language_name="C#",
+            folder_caption=_("Select C# Source Folder"),
+            default_project_name=_("Imported C# Project"),
+            importer=self.__csharp_importer,
+            error_class=CSharpImportError,
+        )
+
+    def import_cpp_sources(self):
+        self.__import_sources(
+            language_name="C++",
+            folder_caption=_("Select C++ Source Folder"),
+            default_project_name=_("Imported C++ Project"),
+            importer=self.__cpp_importer,
+            error_class=CppImportError,
+        )
+
+    def import_python_sources(self):
+        self.__import_sources(
+            language_name="Python",
+            folder_caption=_("Select Python Source Folder"),
+            default_project_name=_("Imported Python Project"),
+            importer=self.__python_importer,
+            error_class=PythonImportError,
+        )
+
+    def __import_sources(self, language_name, folder_caption, default_project_name, importer, error_class):
+        """Generic method for importing source code from various languages."""
+        if Application().unsaved:
+            if not self.__check_save(_("Import {0} Sources").format(language_name)):
+                return
+
+        directory = QFileDialog.getExistingDirectory(self, caption=folder_caption)
+        if not directory:
+            return
+
+        # Ask user to select internal or external view
+        view_options = [_("Internal (all members)"), _("External (public only)")]
+        view_choice, ok = QInputDialog.getItem(
+            self,
+            _("Import View"),
+            _("Select import view:"),
+            view_options,
+            0,
+            False,
+        )
+        if not ok:
+            return
+        
+        import_view = ImportView.EXTERNAL if view_choice == view_options[1] else ImportView.INTERNAL
+
+        suggested_name = os.path.basename(directory) or default_project_name
+        name, ok = QInputDialog.getText(
+            self,
+            _("Project Name"),
+            _("Choose a name for the imported project:"),
+            text=suggested_name,
+        )
+        if not ok:
+            return
+        project_name = name.strip() or suggested_name
+
+        cursor_applied = False
+        try:
+            QApplication.setOverrideCursor(Qt.WaitCursor)
+            cursor_applied = True
+            report = importer.import_directory(directory, project_name=project_name, view=import_view)
+        except error_class as exc:
+            QMessageBox.critical(self, _("{0} Import Failed").format(language_name), str(exc))
+            return
+        except Exception as exc:  # pylint: disable=broad-except
+            LOGGER.exception("Unexpected error while importing %s sources", language_name)
+            QMessageBox.critical(self, _("{0} Import Failed").format(language_name), str(exc))
+            return
+        finally:
+            if cursor_applied:
+                QApplication.restoreOverrideCursor()
+
+        if report.summary.primary_diagram is not None:
+            Application().tabs.select_tab(report.summary.primary_diagram)
+        self.__project_tree.reload()
+
+        warning_text = ""
+        if report.warnings:
+            max_preview = 5
+            preview = "\n".join(report.warnings[:max_preview])
+            if len(report.warnings) > max_preview:
+                preview += "\n" + _("... and {0} more warnings").format(len(report.warnings) - max_preview)
+            warning_text = "\n\n" + _("Warnings:") + "\n" + preview
+
+        QMessageBox.information(
+            self,
+            _("{0} Import Complete").format(language_name),
             _("Imported {0} classes and created {1} relationships.").format(
                 report.summary.elements_created,
                 report.summary.connections_created,

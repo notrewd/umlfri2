@@ -28,7 +28,13 @@ class MainWindowMenu(QMenuBar):
 
         self.__file_new = self.__add_menu_item(file_menu, QKeySequence.New, "document-new", self.__file_new_action)
         self.__file_open = self.__add_menu_item(file_menu, QKeySequence.Open, "document-open", self.__file_open_action)
-        self.__file_import_java = self.__add_menu_item(file_menu, None, None, self.__file_import_java_action)
+
+        # Import submenu
+        self.__file_import, self.__import_menu = self.__add_menu(file_menu)
+        self.__file_import_java = self.__add_menu_item(self.__import_menu, None, None, self.__file_import_java_action)
+        self.__file_import_csharp = self.__add_menu_item(self.__import_menu, None, None, self.__file_import_csharp_action)
+        self.__file_import_cpp = self.__add_menu_item(self.__import_menu, None, None, self.__file_import_cpp_action)
+        self.__file_import_python = self.__add_menu_item(self.__import_menu, None, None, self.__file_import_python_action)
 
         self.__file_recent_files, self.__recent_files_menu = self.__add_menu(file_menu)
         self.__recent_files_menu.aboutToShow.connect(self.__recent_files_menu_populate)
@@ -156,7 +162,11 @@ class MainWindowMenu(QMenuBar):
         
         self.__file_save.setEnabled(Application().can_save_solution)
         self.__file_save_as.setEnabled(Application().can_save_solution_as)
+        self.__file_import.setEnabled(True)
         self.__file_import_java.setEnabled(True)
+        self.__file_import_csharp.setEnabled(True)
+        self.__file_import_cpp.setEnabled(True)
+        self.__file_import_python.setEnabled(True)
         
         self.__file_recent_files.setEnabled(any(Application().recent_files))
         
@@ -216,6 +226,15 @@ class MainWindowMenu(QMenuBar):
 
     def __file_import_java_action(self, checked=False):
         self.__main_window.import_java_sources()
+
+    def __file_import_csharp_action(self, checked=False):
+        self.__main_window.import_csharp_sources()
+
+    def __file_import_cpp_action(self, checked=False):
+        self.__main_window.import_cpp_sources()
+
+    def __file_import_python_action(self, checked=False):
+        self.__main_window.import_python_sources()
     
     def __file_page_setup_action(self, checked=False):
         Printing().show_page_setup()
@@ -340,7 +359,11 @@ class MainWindowMenu(QMenuBar):
         self.__file.setText(_("&File"))
         self.__file_new.setText(_("&New"))
         self.__file_open.setText(_("&Open"))
-        self.__file_import_java.setText(_("Import &Java Sources"))
+        self.__file_import.setText(_("&Import"))
+        self.__file_import_java.setText(_("&Java Sources"))
+        self.__file_import_csharp.setText(_("C&# Sources"))
+        self.__file_import_cpp.setText(_("C&++ Sources"))
+        self.__file_import_python.setText(_("&Python Sources"))
         self.__file_recent_files.setText(_("&Recent Files"))
         self.__file_save.setText(_("&Save"))
         self.__file_save_as.setText(_("Save &as"))
